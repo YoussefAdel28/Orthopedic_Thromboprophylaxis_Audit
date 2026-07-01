@@ -796,3 +796,288 @@ cat("Working directory:", getwd(), "\n")
 ## ============================================================
 ## END OF SCRIPT
 ## ============================================================
+
+
+x1 <- sum(c1$DVT)  # number of DVT-positive cases in Cycle 1
+x2 <- sum(c2$DVT)  # number of DVT-positive cases in Cycle 2
+
+## ---- 5. Incidence + 95% CI (Wald / normal approximation) ----
+## This is the simpler, more commonly reported CI in clinical audits
+wald_ci <- function(x, n, conf.level = 0.95) {
+  p <- x / n
+  z <- qnorm(1 - (1 - conf.level) / 2)
+  se <- sqrt(p * (1 - p) / n)
+  lower <- max(0, p - z * se)
+  upper <- min(1, p + z * se)
+  return(c(estimate = p, lower = lower, upper = upper))
+}
+
+cat("\n--- Cycle 1 DVT Incidence (Wald 95% CI) ---\n")
+print(round(wald_ci(x1, n1) * 100, 1))
+
+cat("\n--- Cycle 2 DVT Incidence (Wald 95% CI) ---\n")
+print(round(wald_ci(x2, n2) * 100, 1))
+
+## ---- 6. Incidence + 95% CI (Wilson score interval) ----
+## More robust for smaller samples / proportions near 0 or 1
+## Uses base R's prop.test, which defaults to Wilson-type CI with continuity correction
+wilson_ci_1 <- prop.test(x1, n1, correct = TRUE)
+wilson_ci_2 <- prop.test(x2, n2, correct = TRUE)
+
+cat("\n--- Cycle 1 DVT Incidence (Wilson 95% CI, continuity corrected) ---\n")
+cat("Estimate:", round(wilson_ci_1$estimate * 100, 1), "%\n")
+cat("95% CI:", round(wilson_ci_1$conf.int[1] * 100, 1), "% to",
+    round(wilson_ci_1$conf.int[2] * 100, 1), "%\n")
+
+cat("\n--- Cycle 2 DVT Incidence (Wilson 95% CI, continuity corrected) ---\n")
+cat("Estimate:", round(wilson_ci_2$estimate * 100, 1), "%\n")
+cat("95% CI:", round(wilson_ci_2$conf.int[1] * 100, 1), "% to",
+    round(wilson_ci_2$conf.int[2] * 100, 1), "%\n")
+
+## ---- 7. Two-proportion z-test: Cycle 1 vs Cycle 2 ----
+## prop.test() performs a chi-square test which is mathematically equivalent
+## to a two-proportion z-test for a 2x2 comparison (z^2 = chi-square statistic)
+two_prop_test <- prop.test(
+  x = c(x1, x2),
+  n = c(n1, n2),
+  correct = TRUE   # applies Yates' continuity correction (standard for 2x2 comparisons)
+)
+
+cat("\n--- Two-Proportion Z-Test: Cycle 1 vs Cycle 2 ---\n")
+print(two_prop_test)
+
+## Extract a clean summary
+cat("\n--- Summary ---\n")
+cat("Cycle 1 incidence:", round(x1/n1 * 100, 1), "%\n")
+cat("Cycle 2 incidence:", round(x2/n2 * 100, 1), "%\n")
+cat("Difference in proportions:", round((x1/n1 - x2/n2) * 100, 1), "percentage points\n")
+cat("Chi-square statistic:", round(two_prop_test$statistic, 3), "\n")
+cat("p-value:", format.pval(two_prop_test$p.value, digits = 3), "\n")
+cat("95% CI for difference in proportions:",
+    round(two_prop_test$conf.int[1] * 100, 1), "% to",
+    round(two_prop_test$conf.int[2] * 100, 1), "%\n")
+
+## WALD IS USED IN THE MANUSCRIPT
+
+
+## ---- STEP 1: Calculate incidence and Wald 95% CIs ----
+
+wald_ci <- function(x, n, conf.level = 0.95) {
+  p     <- x / n
+  z     <- qnorm(1 - (1 - conf.level) / 2)
+  se    <- sqrt(p * (1 - p) / n)
+  lower <- max(0, p - z * se)
+  upper <- min(1, p + z * se)
+  data.frame(estimate = p * 100,
+             lower    = lower * 100,
+             upper    = upper * 100)
+}
+
+dvt_data <- bind_rows(
+  data.frame(Cycle = "Cycle 1", wald_ci(x = 29, n = 100)),
+  data.frame(Cycle = "Cycle 2", wald_ci(x = 14, n = 109))
+) %>%
+  mutate(
+    Cycle     = factor(Cycle, levels = c("Cycle 1", "Cycle 2")),
+    bar_label = c("29.0%\n(29/100)", "12.8%\n(14/109)")
+  )
+
+cat("=== DVT Incidence with Wald 95% CI ===\n")
+print(dvt_data %>%
+        select(Cycle, estimate, lower, upper) %>%
+        mutate(across(where(is.numeric), ~ round(., 1))),
+      row.names = FALSE)
+
+## ---- STEP 2: Build the bar chart ----
+
+p_dvt_bar <- ggplot(dvt_data,
+                    aes(x = Cycle, y = estimate, fill = Cycle)) +
+  
+  ## Bars
+  geom_bar(stat   = "identity",
+           width  = 0.5,
+           colour = "white") +
+  
+  ## Error bars (Wald 95% CI)
+  geom_errorbar(
+    aes(ymin = lower, ymax = upper),
+    width     = 0.12,
+    linewidth = 0.9,
+    colour    = "grey25"
+  ) +
+  
+  ## Percentage + count label inside bar
+  geom_text(
+    aes(label = bar_label),
+    y          = 5,
+    size       = 4,
+    fontface   = "bold",
+    colour     = "white",
+    lineheight = 1.1
+  ) +
+  
+  ## CI range label above each error bar
+  geom_text(
+    aes(y     = upper,
+        label = paste0("95% CI:\n",
+                       round(lower, 1), "–",
+                       round(upper, 1), "%")),
+    vjust      = -0.4,
+    size       = 3.2,
+    colour     = "grey30",
+    lineheight = 1.0
+  ) +
+  
+  scale_fill_manual(
+    values = c("Cycle 1" = "#2E86AB",
+               "Cycle 2" = "#A23B72")
+  ) +
+  
+  scale_y_continuous(
+    limits = c(0, 48),
+    breaks = seq(0, 45, 5),
+    labels = function(x) paste0(x, "%"),
+    expand = c(0, 0)
+  ) +
+  
+  labs(
+    x    = NULL,
+    y    = "DVT Incidence (%)"
+  ) +
+  
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position    = "none",
+    plot.title         = element_blank(),
+    plot.subtitle      = element_blank(),
+    plot.caption       = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor   = element_blank(),
+    axis.text.x        = element_text(size = 12, face = "bold"),
+    axis.text.y        = element_text(size = 10),
+    plot.margin        = margin(15, 20, 15, 15)
+  )
+
+print(p_dvt_bar)
+
+ggsave("dvt_incidence_bar_chart.png", p_dvt_bar,
+       width = 7, height = 7, dpi = 300, bg = "white")
+
+cat("\nSaved: dvt_incidence_bar_chart.png\n")
+cat("Working directory:", getwd(), "\n")
+
+## ============================================================
+## END OF SCRIPT
+## ============================================================
+
+
+
+
+
+## ---- STEP 1: Build fracture site distribution data ----
+## Proportion of patients with each fracture site, by cycle
+
+frac_dist <- bind_rows(
+  cycle1_raw %>%
+    mutate(Cycle = "Cycle 1") %>%
+    count(Cycle, Fracture_site) %>%
+    mutate(Pct = n / sum(n) * 100),
+  cycle2_raw %>%
+    mutate(Cycle = "Cycle 2") %>%
+    count(Cycle, Fracture_site) %>%
+    mutate(Pct = n / sum(n) * 100)
+) %>%
+  mutate(
+    Cycle = factor(Cycle, levels = c("Cycle 1", "Cycle 2")),
+    ## Order fracture sites by overall frequency for cleaner display
+    Fracture_site = factor(Fracture_site,
+                           levels = c("Hip", "Thigh", "Knee",
+                                      "Leg", "Ankle", "Foot", "Heel"))
+  )
+
+## Quick check
+cat("=== Fracture site distribution (%) ===\n")
+print(frac_dist %>% select(Cycle, Fracture_site, n, Pct) %>%
+        mutate(Pct = round(Pct, 1)), row.names = FALSE)
+
+## ---- STEP 2: Build DVT rate by fracture site data ----
+
+frac_dvt <- bind_rows(
+  data.frame(
+    Cycle         = "Cycle 1",
+    Fracture_site = cycle1_raw$Fracture_site,
+    DVT           = c1$DVT
+  ),
+  data.frame(
+    Cycle         = "Cycle 2",
+    Fracture_site = cycle2_raw$Fracture_site,
+    DVT           = c2$DVT
+  )
+) %>%
+  group_by(Cycle, Fracture_site) %>%
+  summarise(
+    n_total = n(),
+    n_dvt   = sum(DVT, na.rm = TRUE),
+    DVT_pct = n_dvt / n_total * 100,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Cycle = factor(Cycle, levels = c("Cycle 1", "Cycle 2")),
+    Fracture_site = factor(Fracture_site,
+                           levels = c("Hip", "Thigh", "Knee",
+                                      "Leg", "Ankle", "Foot", "Heel")),
+    ## Label showing DVT count / total for each bar
+    bar_label = paste0(n_dvt, "/", n_total)
+  )
+
+## ============================================================
+## CHART 1: Fracture site distribution (% of patients per cycle)
+## ============================================================
+
+p_dist <- ggplot(frac_dist,
+                 aes(x = Fracture_site, y = Pct, fill = Cycle)) +
+  
+  geom_bar(stat = "identity",
+           position = position_dodge(width = 0.7),
+           width = 0.65) +
+  
+  ## Add percentage labels on top of each bar
+  geom_text(aes(label = paste0(round(Pct, 1), "%")),
+            position = position_dodge(width = 0.7),
+            vjust    = -0.4,
+            size     = 3.2,
+            colour   = "grey20",
+            family   = "Tahoma") +
+  
+  scale_fill_manual(values = c("Cycle 1" = "#2E86AB",
+                               "Cycle 2" = "#A23B72")) +
+  
+  scale_y_continuous(
+    limits = c(0, 50),
+    breaks = seq(0, 50, 5),
+    labels = function(x) paste0(x, "%")
+  ) +
+  
+  labs(
+    x        = "Fracture Site",
+    y        = "Percentage of Lower Limb Fractures (%)",
+    fill     = NULL
+  ) +
+  
+  theme_minimal(base_size = 30, base_family = "Tahoma") +
+  theme(
+    plot.title      = element_text(face = "bold", size = 12),
+    plot.subtitle   = element_text(size = 10, colour = "grey40"),
+    legend.position = "top",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor   = element_blank(),
+    axis.text.x     = element_text(size = 30)
+  )
+
+print(p_dist)
+ggsave("fracture_site_distribution.png", p_dist,
+       width = 10, height = 6, dpi = 300, bg = "white")
+cat("Saved: fracture_site_distribution.png\n")
+
+
+cycle2_fresh <- Cycle_2
